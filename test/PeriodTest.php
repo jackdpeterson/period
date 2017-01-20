@@ -4,13 +4,15 @@ namespace League\Period\Test;
 
 use DateInterval;
 use DatePeriod;
-use DateTime;
 use DateTimeImmutable;
 use DateTimeZone;
+use Exception;
 use Generator;
 use JsonSerializable;
 use League\Period\Period;
-use PHPUnit_Framework_TestCase as TestCase;
+use LogicException;
+use OutOfRangeException;
+use PHPUnit\Framework\TestCase as TestCase;
 
 class ExtendedDate extends DateTimeImmutable
 {
@@ -53,15 +55,8 @@ class PeriodTest extends TestCase
         $this->assertInstanceof(JsonSerializable::class, $period);
         $res = json_decode(json_encode($period));
 
-        $this->assertEquals(
-            $period->getStartDate(),
-            new DateTimeImmutable($res->startDate->date, new DateTimeZone($res->startDate->timezone))
-        );
-
-        $this->assertEquals(
-            $period->getEndDate(),
-            new DateTimeImmutable($res->endDate->date, new DateTimeZone($res->endDate->timezone))
-        );
+        $this->assertEquals($period->getStartDate(), date_create_immutable($res->startDate));
+        $this->assertEquals($period->getEndDate(), date_create_immutable($res->endDate));
     }
 
     /**
@@ -69,7 +64,7 @@ class PeriodTest extends TestCase
      */
     public function testGetDatePeriod($interval, $option, $count)
     {
-        $period = Period::createFromDuration(new DateTime(), '1 DAY');
+        $period = Period::createFromDuration(date_create('2012-01-12'), '1 DAY');
         $range = $period->getDatePeriod($interval, $option);
         $this->assertInstanceof(DatePeriod::class, $range);
         $this->assertCount($count, iterator_to_array($range));
@@ -89,12 +84,10 @@ class PeriodTest extends TestCase
         ];
     }
 
-    /**
-     * @expectedException \Exception
-     */
     public function testGetDatePeriodThrowsException()
     {
-        Period::createFromDuration(new DateTime(), '1 DAY')->getDatePeriod(-3600);
+        $this->expectException(Exception::class);
+        Period::createFromDuration(date_create('2012-01-12'), '1 DAY')->getDatePeriod(-3600);
     }
 
     public function testGetDateInterval()
@@ -106,12 +99,12 @@ class PeriodTest extends TestCase
     public function testGetTimestampInterval()
     {
         $period = Period::createFromMonth(2014, 3);
-        $this->assertInternalType('int', $period->getTimestampInterval());
+        $this->assertInternalType('float', $period->getTimestampInterval());
     }
 
     public function testSplit()
     {
-        $period = Period::createFromDuration(new DateTime(), '1 DAY');
+        $period = Period::createFromDuration(date_create('2012-01-12'), '1 DAY');
         $range = $period->split(3600);
         $this->assertInstanceof(Generator::class, $range);
         foreach ($range as $innerPeriod) {
@@ -121,7 +114,7 @@ class PeriodTest extends TestCase
 
     public function testSplitMustRecreateParentObject()
     {
-        $period = Period::createFromDuration(new DateTime(), '1 DAY');
+        $period = Period::createFromDuration(date_create('2012-01-12'), '1 DAY');
         $range  = $period->split(3600);
         $total = null;
         foreach ($range as $part) {
@@ -137,18 +130,14 @@ class PeriodTest extends TestCase
 
     public function testSplitWithLargeInterval()
     {
-        $period = Period::createFromDuration(new DateTime(), '1 DAY');
+        $period = Period::createFromDuration(date_create('2012-01-12'), '1 DAY');
         $range  = $period->split('2 DAY');
-        //HHVM bug fix
-        if (defined('HHVM_VERSION')) {
-            $range->next();
-        }
         $this->assertEquals($period, $range->current());
     }
 
     public function testSplitWithInconsistentInterval()
     {
-        $period = Period::createFromDuration(new DateTime(), '1 DAY');
+        $period = Period::createFromDuration(date_create('2012-01-12'), '1 DAY');
         $range = iterator_to_array($period->split('10 HOURS'));
         $last = array_pop($range);
         $this->assertEquals(14400, $last->getTimestampInterval());
@@ -156,9 +145,6 @@ class PeriodTest extends TestCase
 
     public function testSetState()
     {
-        if (!method_exists(DateTimeImmutable::class, '__set_state')) {
-            $this->markTestSkipped('DateTimeImmutable::__set_state is not implemented in HHVM');
-        }
         $period = new Period('2014-05-01', '2014-05-08');
         $generatedPeriod = eval('return '.var_export($period, true).';');
         $this->assertTrue($generatedPeriod->sameValueAs($period));
@@ -168,8 +154,8 @@ class PeriodTest extends TestCase
     {
         $period = new Period('2014-05-01', '2014-05-08');
         $start = $period->getStartDate();
-        $this->assertEquals(new DateTimeImmutable('2014-05-01'), $start);
-        $this->assertEquals(new DateTimeImmutable('2014-05-08'), $period->getEndDate());
+        $this->assertEquals(date_create_immutable('2014-05-01'), $start);
+        $this->assertEquals(date_create_immutable('2014-05-08'), $period->getEndDate());
         $this->assertInstanceof(DateTimeImmutable::class, $start);
     }
 
@@ -179,20 +165,18 @@ class PeriodTest extends TestCase
         $this->assertEquals(new DateInterval('PT0S'), $period->getDateInterval());
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testConstructorThrowException()
     {
+        $this->expectException(LogicException::class);
         new Period(
-            new DateTime('2014-05-01', new DateTimeZone('Europe/Paris')),
-            new DateTime('2014-05-01', new DateTimeZone('Africa/Nairobi'))
+            date_create('2014-05-01', new DateTimeZone('Europe/Paris')),
+            date_create('2014-05-01', new DateTimeZone('Africa/Nairobi'))
         );
     }
 
     public function testConstructorWithDateTimeInterface()
     {
-        $period = new Period('2014-05-01', new DateTime('2014-05-08'));
+        $period = new Period('2014-05-01', date_create('2014-05-08'));
         $this->assertInstanceof(DateTimeImmutable::class, $period->getEndDate());
         $this->assertInstanceof(DateTimeImmutable::class, $period->getStartDate());
     }
@@ -203,8 +187,8 @@ class PeriodTest extends TestCase
     public function testCreateFromDuration($startDate, $endDate, $duration)
     {
         $period = Period::createFromDuration($startDate, $duration);
-        $this->assertEquals(new DateTimeImmutable($startDate), $period->getStartDate());
-        $this->assertEquals(new DateTimeImmutable($endDate), $period->getEndDate());
+        $this->assertEquals(date_create_immutable($startDate), $period->getStartDate());
+        $this->assertEquals(date_create_immutable($endDate), $period->getEndDate());
     }
 
     public function provideCreateFromDurationData()
@@ -225,20 +209,16 @@ class PeriodTest extends TestCase
         ];
     }
 
-    /**
-     * @expectedException \Exception
-     */
     public function testCreateFromDurationWithInvalidInteger()
     {
+        $this->expectException(Exception::class);
         Period::createFromDuration('2014-01-01', -1);
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testCreateFromDurationFailedWithOutofRangeInterval()
     {
-        Period::createFromDuration(new DateTime(), '-1 DAY');
+        $this->expectException(LogicException::class);
+        Period::createFromDuration(date_create('2012-01-12'), '-1 DAY');
     }
 
     /**
@@ -247,8 +227,8 @@ class PeriodTest extends TestCase
     public function testCreateFromDurationBeforeEnd($startDate, $endDate, $duration)
     {
         $period = Period::createFromDurationBeforeEnd($endDate, $duration);
-        $this->assertEquals(new DateTimeImmutable($startDate), $period->getStartDate());
-        $this->assertEquals(new DateTimeImmutable($endDate), $period->getEndDate());
+        $this->assertEquals(date_create_immutable($startDate), $period->getStartDate());
+        $this->assertEquals(date_create_immutable($endDate), $period->getEndDate());
     }
 
     public function provideCreateFromDurationBeforeEndData()
@@ -266,166 +246,104 @@ class PeriodTest extends TestCase
         ];
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testCreateFromDurationBeforeEndFailedWithOutofRangeInterval()
     {
-        Period::createFromDurationBeforeEnd(new DateTime(), '-1 DAY');
+        $this->expectException(LogicException::class);
+        Period::createFromDurationBeforeEnd(date_create('2012-01-12'), '-1 DAY');
     }
 
     public function testCreateFromWeek()
     {
         $period = Period::createFromWeek(2014, 3);
-        $this->assertEquals($period->getStartDate(), new DateTimeImmutable('2014-01-13'));
-        $this->assertEquals($period->getEndDate(), new DateTimeImmutable('2014-01-20'));
+        $this->assertEquals($period->getStartDate(), date_create_immutable('2014-01-13'));
+        $this->assertEquals($period->getEndDate(), date_create_immutable('2014-01-20'));
     }
 
-    /**
-     * @expectedException \InvalidArgumentException
-     */
-    public function testCreateFromWeekFailedWithInvalidYear()
-    {
-        Period::createFromWeek('toto', 5);
-    }
-
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromWeekFailedWithLowInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromWeek(2014, 0);
     }
 
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromWeekFailedWithHighInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromWeek(2014, 54);
     }
 
     public function testCreateFromMonth()
     {
         $period = Period::createFromMonth(2014, 3);
-        $this->assertEquals($period->getStartDate(), new DateTimeImmutable('2014-03-01'));
-        $this->assertEquals($period->getEndDate(), new DateTimeImmutable('2014-04-01'));
+        $this->assertEquals($period->getStartDate(), date_create_immutable('2014-03-01'));
+        $this->assertEquals($period->getEndDate(), date_create_immutable('2014-04-01'));
     }
 
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromMonthFailedWithHighInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromMonth(2014, 13);
     }
 
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromMonthFailedWithLowInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromMonth(2014, 0);
-    }
-
-    /**
-     * @expectedException \InvalidArgumentException
-     */
-    public function testCreateFromMonthFailedWithInvalidYear()
-    {
-        Period::createFromMonth('120 toto', 8);
     }
 
     public function testCreateFromQuarter()
     {
         $period = Period::createFromQuarter(2014, 3);
-        $this->assertEquals($period->getStartDate(), new DateTimeImmutable('2014-07-01'));
-        $this->assertEquals($period->getEndDate(), new DateTimeImmutable('2014-10-01'));
+        $this->assertEquals($period->getStartDate(), date_create_immutable('2014-07-01'));
+        $this->assertEquals($period->getEndDate(), date_create_immutable('2014-10-01'));
     }
 
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromQuarterFailedWithHighInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromQuarter(2014, 5);
     }
 
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromQuarterFailedWithLowInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromQuarter(2014, 0);
-    }
-
-    /**
-     * @expectedException \InvalidArgumentException
-     */
-    public function testCreateFromQuarterFailedWithInvalidYear()
-    {
-        Period::createFromQuarter('toto', 2);
     }
 
     public function testCreateFromSemester()
     {
         $period = Period::createFromSemester(2014, 2);
-        $this->assertEquals($period->getStartDate(), new DateTimeImmutable('2014-07-01'));
-        $this->assertEquals($period->getEndDate(), new DateTimeImmutable('2015-01-01'));
+        $this->assertEquals($period->getStartDate(), date_create_immutable('2014-07-01'));
+        $this->assertEquals($period->getEndDate(), date_create_immutable('2015-01-01'));
     }
 
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromSemesterFailedWithLowInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromSemester(2014, 0);
     }
 
-    /**
-     * @expectedException \OutOfRangeException
-     */
     public function testCreateFromSemesterFailedWithHighInvalidIndex()
     {
+        $this->expectException(OutOfRangeException::class);
         Period::createFromSemester(2014, 3);
-    }
-
-    /**
-     * @expectedException \InvalidArgumentException
-     */
-    public function testCreateFromSemesterFailedWithInvalidYear()
-    {
-        Period::createFromSemester('toto', 1);
     }
 
     public function testCreateFromYear()
     {
         $period = Period::createFromYear(2014);
-        $this->assertEquals($period->getStartDate(), new DateTimeImmutable('2014-01-01'));
-        $this->assertEquals($period->getEndDate(), new DateTimeImmutable('2015-01-01'));
-    }
-
-    /**
-     * @expectedException \InvalidArgumentException
-     */
-    public function testCreateFromYearFailedWithInvalidYear()
-    {
-        Period::createFromYear('toto');
+        $this->assertEquals($period->getStartDate(), date_create_immutable('2014-01-01'));
+        $this->assertEquals($period->getEndDate(), date_create_immutable('2015-01-01'));
     }
 
     public function testCreateFromDay()
     {
         $period = Period::createFromDay('2015-01-03 08:06:25.235');
-        $this->assertEquals($period->getStartDate(), new DateTimeImmutable('2015-01-03'));
-        $this->assertEquals($period->getEndDate(), new DateTimeImmutable('2015-01-04'));
+        $this->assertEquals($period->getStartDate(), date_create_immutable('2015-01-03'));
+        $this->assertEquals($period->getEndDate(), date_create_immutable('2015-01-04'));
     }
 
     public function testCreateFromDayPreserveTimezone()
     {
-        if (defined('HHVM_VERSION')) {
-            $this->markTestSkipped('DateTimeImmutable::createFromFormat is buggy in HHVM');
-        }
-
         $period = Period::createFromDay('2008-07-01T22:35:17+08:00');
         $this->assertEquals('+08:00', $period->getStartDate()->format('P'));
         $this->assertEquals('+08:00', $period->getEndDate()->format('P'));
@@ -442,8 +360,8 @@ class PeriodTest extends TestCase
     public function testIsBeforeDatetime()
     {
         $orig = Period::createFromDuration('2012-01-01', '1 MONTH');
-        $this->assertTrue($orig->isBefore(new DateTime('2015-01-01')));
-        $this->assertFalse($orig->isBefore(new DateTime('2010-01-01')));
+        $this->assertTrue($orig->isBefore(date_create('2015-01-01')));
+        $this->assertFalse($orig->isBefore(date_create('2010-01-01')));
     }
 
     public function testIsBeforePeriod()
@@ -463,8 +381,8 @@ class PeriodTest extends TestCase
     public function testIsAfterDatetime()
     {
         $orig = Period::createFromDuration('2012-01-01', '1 MONTH');
-        $this->assertFalse($orig->isAfter(new DateTime('2015-01-01')));
-        $this->assertTrue($orig->isAfter(new DateTime('2010-01-01')));
+        $this->assertFalse($orig->isAfter(date_create('2015-01-01')));
+        $this->assertTrue($orig->isAfter(date_create('2010-01-01')));
     }
 
     public function testIsAfterPeriod()
@@ -570,7 +488,7 @@ class PeriodTest extends TestCase
         return [
             'testContainsReturnsTrueWithADateTimeInterfaceObject' => [
                 Period::createFromMonth(2014, 3),
-                new DateTime('2014-03-12'),
+                date_create('2014-03-12'),
                 true,
             ],
             'testContainsReturnsTrueWithPeriodObject' => [
@@ -580,7 +498,7 @@ class PeriodTest extends TestCase
             ],
             'testContainsReturnsFalseWithADateTimeInterfaceObject' => [
                 Period::createFromMonth(2014, 3),
-                new DateTime('2015-03-12'),
+                date_create('2015-03-12'),
                 false,
             ],
             'testContainsReturnsFalseWithADateTimeInterfaceObjectAfterPeriod' => [
@@ -663,38 +581,34 @@ class PeriodTest extends TestCase
 
     public function testStartingOn()
     {
-        $expected  = new DateTime('2012-03-02');
+        $expected  = date_create('2012-03-02');
         $period = Period::createFromWeek(2014, 3);
         $newPeriod = $period->startingOn($expected);
         $this->assertTrue($newPeriod->getStartDate() == $expected);
-        $this->assertEquals($period->getStartDate(), new DateTimeImmutable('2014-01-13'));
+        $this->assertEquals($period->getStartDate(), date_create_immutable('2014-01-13'));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testStartingOnFailedWithWrongStartDate()
     {
+        $this->expectException(LogicException::class);
         $period = Period::createFromWeek(2014, 3);
-        $period->startingOn(new DateTime('2015-03-02'));
+        $period->startingOn(date_create('2015-03-02'));
     }
 
     public function testEndingOn()
     {
-        $expected  = new DateTime('2015-03-02');
+        $expected  = date_create('2015-03-02');
         $period = Period::createFromWeek(2014, 3);
         $newPeriod = $period->endingOn($expected);
         $this->assertTrue($newPeriod->getEndDate() == $expected);
-        $this->assertEquals($period->getEndDate(), new DateTimeImmutable('2014-01-20'));
+        $this->assertEquals($period->getEndDate(), date_create_immutable('2014-01-20'));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testEndingOnFailedWithWrongEndDate()
     {
+        $this->expectException(LogicException::class);
         $period = Period::createFromWeek(2014, 3);
-        $period->endingOn(new DateTime('2012-03-02'));
+        $period->endingOn(date_create('2012-03-02'));
     }
 
     public function testWithDuration()
@@ -704,11 +618,9 @@ class PeriodTest extends TestCase
         $this->assertEquals($expected, $period->withDuration('1 MONTH'));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testWithDurationThrowsException()
     {
+        $this->expectException(LogicException::class);
         $period = Period::createFromDuration('2014-03-01', '2 Weeks');
         $interval = new DateInterval('P1D');
         $interval->invert = 1;
@@ -723,11 +635,9 @@ class PeriodTest extends TestCase
         $this->assertEquals($expected, $period->withDurationBeforeEnd('1 MONTH'));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testWithDurationBeforeEndThrowsException()
     {
+        $this->expectException(LogicException::class);
         $period = Period::createFromDurationBeforeEnd('2014-03-01', '2 Weeks');
         $interval = new DateInterval('P1D');
         $interval->invert = 1;
@@ -747,17 +657,15 @@ class PeriodTest extends TestCase
     public function testAdd()
     {
         $orig = Period::createFromDuration('2012-01-01', '1 MONTH');
-        $period = $orig->add('1 MONTH');
+        $period = $orig->moveEndDate('1 MONTH');
         $this->assertTrue($period->durationGreaterThan($orig));
         $this->assertEquals($orig->getStartDate(), $period->getStartDate());
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testAddThrowsLogicException()
     {
-        Period::createFromDuration('2012-01-01', '1 MONTH')->add('-3 MONTHS');
+        $this->expectException(LogicException::class);
+        Period::createFromDuration('2012-01-01', '1 MONTH')->moveEndDate('-3 MONTHS');
     }
 
     public function testMoveStartDateBackward()
@@ -778,27 +686,23 @@ class PeriodTest extends TestCase
         $this->assertNotEquals($orig->getStartDate(), $period->getStartDate());
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testMoveStartDateThrowsLogicException()
     {
+        $this->expectException(LogicException::class);
         Period::createFromDuration('2012-01-01', '1 MONTH')->moveStartDate('3 MONTHS');
     }
 
     public function testSub()
     {
         $orig = Period::createFromDuration('2012-01-01', '1 MONTH');
-        $period = $orig->sub('1 WEEK');
+        $period = $orig->moveEndDate('-1 WEEK');
         $this->assertTrue($period->durationLessThan($orig));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testSubThrowsLogicException()
     {
-        Period::createFromDuration('2012-01-01', '1 MONTH')->sub('3 MONTHS');
+        $this->expectException(LogicException::class);
+        Period::createFromDuration('2012-01-01', '1 MONTH')->moveEndDate('-3 MONTHS');
     }
 
     public function testNext()
@@ -843,7 +747,7 @@ class PeriodTest extends TestCase
     {
         $orig = Period::createFromDuration('2012-01-01', '1 HOUR');
         $alt = Period::createFromDuration('2012-01-01', '2 HOUR');
-        $this->assertSame(-3600, $orig->timestampIntervalDiff($alt));
+        $this->assertEquals(-3600, $orig->timestampIntervalDiff($alt));
     }
 
     public function testDateIntervalDiffPositionIrrelevant()
@@ -863,20 +767,16 @@ class PeriodTest extends TestCase
         $this->assertInstanceof(Period::class, $orig->intersect($alt));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testIntersectThrowsExceptionWithNoOverlappingTimeRange()
     {
+        $this->expectException(LogicException::class);
         $orig = Period::createFromDuration('2013-01-01', '1 MONTH');
         $orig->intersect(Period::createFromDuration('2012-01-01', '2 MONTH'));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testIntersectThrowsExceptionWithAdjacentTimeRange()
     {
+        $this->expectException(LogicException::class);
         $orig = Period::createFromDuration('2013-01-01', '1 MONTH');
         $orig->intersect($orig->next());
     }
@@ -892,29 +792,23 @@ class PeriodTest extends TestCase
         $this->assertTrue($res->sameValueAs($alt->gap($orig)));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testGapThrowsExceptionWithOverlapsPeriod()
     {
+        $this->expectException(LogicException::class);
         $orig = Period::createFromDuration('2011-12-01', '5 MONTH');
         $orig->gap(Period::createFromDuration('2012-01-01', '2 MONTH'));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testGapWithSameStartingPeriod()
     {
+        $this->expectException(LogicException::class);
         $orig = Period::createFromDuration('2012-12-01', '5 MONTH');
         $orig->gap(Period::createFromDuration('2012-12-01', '2 MONTH'));
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testGapWithSameEndingPeriod()
     {
+        $this->expectException(LogicException::class);
         $orig = Period::createFromDurationBeforeEnd('2012-12-01', '5 MONTH');
         $orig->gap(Period::createFromDurationBeforeEnd('2012-12-01', '2 MONTH'));
     }
@@ -925,14 +819,12 @@ class PeriodTest extends TestCase
         $alt  = $orig->next('1 MINUTE');
         $res  = $orig->gap($alt);
         $this->assertInstanceof(Period::class, $res);
-        $this->assertSame(0, $res->getTimestampInterval());
+        $this->assertEquals(0, $res->getTimestampInterval());
     }
 
-    /**
-     * @expectedException \LogicException
-     */
     public function testDiffThrowsException()
     {
+        $this->expectException(LogicException::class);
         Period::createFromYear(2015)->diff(Period::createFromYear(2013));
     }
 
@@ -950,8 +842,8 @@ class PeriodTest extends TestCase
         $res = $alt->diff($period);
         $this->assertCount(1, $res);
         $this->assertInstanceof(Period::class, $res[0]);
-        $this->assertEquals(new DateTimeImmutable('2013-04-01'), $res[0]->getStartDate());
-        $this->assertEquals(new DateTimeImmutable('2014-01-01'), $res[0]->getEndDate());
+        $this->assertEquals(date_create_immutable('2013-04-01'), $res[0]->getStartDate());
+        $this->assertEquals(date_create_immutable('2014-01-01'), $res[0]->getEndDate());
     }
 
     public function testDiffWithOverlapsPeriod()
